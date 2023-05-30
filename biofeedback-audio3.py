@@ -1,3 +1,9 @@
+#Biofeedback mindfulness by Simone TRavaglini
+# Licence Apache 2.0
+#Da fare: si blocca generazione grafico dopo un po', farlo funzionare anche se non arriva valore HR (modifica sketch arduino), fare grafico HRV, calcolare HR medio di sessione,
+#rivedere calcolo HRV se metodo valido, nel grafico mostrare linee senza picchi, 
+#
+
 import csv
 import random
 import serial
@@ -14,6 +20,31 @@ import pygame
 import matplotlib.ticker as ticker
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
+import configparser
+
+#funzione per salvare l'identificativo
+def save_identificativo(identificativo):
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    config['SETTINGS'] = {'identificativo': identificativo}
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
+
+#funzione per caricare l'identificativo
+def load_identificativo():
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    return config.get('SETTINGS', 'identificativo')
+
+
+#se non ancora creato lo aggiunge al file config.ini
+if not os.path.isfile('config.ini'):
+    with open('config.ini', 'w') as configfile:
+        configfile.write('[SETTINGS]\nidentificativo = \n')
+
+#carico l'identificativo
+identificativo = load_identificativo()
+
 
 # Funzione per ottenere il tempo come intero
 def time_as_int():
@@ -64,7 +95,7 @@ layout = [
     [sg.Combo(baud_list, size=(30, 1), key='-BAUD-', default_value='9600')],
     [sg.Button('Connetti', key='-CONNECT-'), sg.Button('Esci', key='-EXIT-')],
     [sg.Column([
-        [sg.Text("Inserisci il tuo codice identificativo:"),sg.InputText(key='-IDENTIFICATIVO-')],
+        [sg.Text("Inserisci il tuo codice identificativo:"),sg.InputText(identificativo,key='-IDENTIFICATIVO-')],
         [sg.Text("Seleziona un file audio:")],
         [sg.Combo(audio_files, key="-FILE-")],
         [sg.Text('Output seriale:')],
@@ -89,8 +120,16 @@ graph_running = False
 # Funzione per l'aggiornamento del grafico
 def update_graph():
     fig, ax = plt.subplots()
-    line, = ax.plot(timestamps, values2, label = 'GSR')
-    line2, = ax.plot(timestamps, values1, label = 'HR')
+    line, = ax.plot(timestamps, values3, color='blue', label = 'GSR')
+    ax2 = ax.twinx()
+    line2, = ax2.plot(timestamps, values1, color='red', label = 'HR')
+    line.set_label('GSR')
+    line2.set_label('HR')
+    ax.legend(loc='upper left')
+    ax2.legend(loc='upper right')
+    #ax.legend()
+    #ax2.legend()
+
     
 
     def format_xaxis(x, _):
@@ -104,10 +143,13 @@ def update_graph():
     canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
 
     while graph_running:
-        line.set_data(timestamps, values2)
+        line.set_data(timestamps, values3)
         line2.set_data(timestamps, values1)
         ax.relim()
         ax.autoscale_view()
+        ax2.relim()
+        ax2.autoscale_view()
+
         
         # Imposta solo 5 valori come indicatori sull'asse X
         max_ticks = 5  # Numero di indicatori desiderati sull'asse X
@@ -154,18 +196,24 @@ while True:
             start_time = time_as_int()
             selected_file = values["-FILE-"]
             identificativo = values["-IDENTIFICATIVO-"]
-            file_path = os.path.join(audio_folder, selected_file)
-            selected_file = values["-FILE-"]
+            save_identificativo(identificativo)
 
-            if not is_playing:
-                if pause_position == 0:
-                    pygame.mixer.music.load(file_path)
-                    pygame.mixer.music.play()
+            
+            if selected_file:
+                file_path = os.path.join(audio_folder, selected_file)
+            
+
+                if not is_playing:
+                    if pause_position == 0:
+                        pygame.mixer.music.load(file_path)
+                        pygame.mixer.music.play()
+                    else:
+                        pygame.mixer.music.play(start=pause_position)
+
+                    is_playing = True
+                    window["-STOP-"].update(disabled=False)
                 else:
-                    pygame.mixer.music.play(start=pause_position)
-
-                is_playing = True
-                window["-STOP-"].update(disabled=False)
+                    sg.popup('Nessun file audio selezionato.')
 
     elif event == '-STOP-':
         pygame.mixer.music.stop()
@@ -220,24 +268,27 @@ while True:
                     
                     # Aggiorna i tre ultimi valori letti
                     last_values.pop(0)
-                    last_values.append(f'Time:{value2:.2f}, GSR: {value3:.2f}, Battiti: {value1:.2f}, HRV:{rms:.2f}, HRV2:{rms2:.2f}')
-                    window['-LAST_VALUES-'].update('  '.join(last_values[-1:]))
-                    window['-TIMER-'].update(format_timer(time_as_int() - start_time))
+                    last_values.append(f'Time:{value2:.2f}, GSR: {value3:.2f}, Battiti: {value1:.2f}, HRV:{rms:.2f}, HRV senza picchi:{rms2:.2f}')
 
+                    # Aggiorna l'interfaccia grafica con gli ultimi tre valori letti
+                    window['-LAST_VALUES-'].update('\n'.join(last_values))
 
+                    # Aggiorna l'interfaccia grafica con il timer
+                    window['-TIMER-'].update(timenow)
+                    
                 except ValueError:
-                    pass
-
-                with open("test_data.csv", "a") as f:
-                    writer = csv.writer(f, delimiter=",")
-                    writer.writerow([identificativo] + [selected_file] + [currentDateAndTime] + [timenow] + values)  # scrive
+                    continue
 
     except Exception as e:
-        sg.popup(f"Errore nella lettura seriale: {e}")
+        sg.popup(f"Errore di lettura seriale: {e}")
         continue
 
-ser.close()
+# Termina il thread del grafico e chiude la porta seriale
 graph_running = False
 graph_thread.join()
-pygame.quit()
+
+if ser:
+    ser.close()
+
+# Chiude la finestra dell'interfaccia grafica
 window.close()
