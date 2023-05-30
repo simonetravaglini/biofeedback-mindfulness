@@ -12,6 +12,8 @@ import numpy as np
 import os
 import pygame
 import matplotlib.ticker as ticker
+from scipy.signal import find_peaks
+import matplotlib.pyplot as plt
 
 # Funzione per ottenere il tempo come intero
 def time_as_int():
@@ -87,7 +89,9 @@ graph_running = False
 # Funzione per l'aggiornamento del grafico
 def update_graph():
     fig, ax = plt.subplots()
-    line, = ax.plot(timestamps, values1)
+    line, = ax.plot(timestamps, values2, label = 'GSR')
+    line2, = ax.plot(timestamps, values1, label = 'HR')
+    
 
     def format_xaxis(x, _):
         return format_timer(int(x))
@@ -100,7 +104,8 @@ def update_graph():
     canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
 
     while graph_running:
-        line.set_data(timestamps, values1)
+        line.set_data(timestamps, values2)
+        line2.set_data(timestamps, values1)
         ax.relim()
         ax.autoscale_view()
         
@@ -191,22 +196,31 @@ while True:
 
             if len(values) == 3:
                 try:
-                    value1 = float(values[0])
-                    value2 = float(values[1])
-                    value3 = float(values[2])
+                    value1 = float(values[0]) #battiti
+                    value2 = float(values[1]) #time
+                    value3 = float(values[2]) #gsr
 
                     values1.append(value1)
                     values2.append(value2)
                     values3.append(value3)
                     timestamps.append(time_as_int() - start_time)
 
-                    #calcolo lo scarto quadratico medio
-                    sq_diff = np.square(values1 - np.mean(values1))
-                    rms = np.sqrt(np.mean(sq_diff))
+                    #elimino i picchi dall'HRV
+                    indici_picchi, _ = find_peaks(values2)
+                    valori_senza_picchi = np.delete(values2, indici_picchi)
 
+                    #calcolo lo scarto quadratico medio per HRV
+                    sq_diff = np.square(values2 - np.mean(values2))
+                    rms = np.sqrt(np.mean(sq_diff))
+                    
+                    #calcolo lo scarto quadratico medio per HRV senza picchi
+                    sq_diff2 = np.square(valori_senza_picchi - np.mean(valori_senza_picchi))
+                    rms2 = np.sqrt(np.mean(sq_diff2))
+
+                    
                     # Aggiorna i tre ultimi valori letti
                     last_values.pop(0)
-                    last_values.append(f'Time:{value1:.2f}, GSR: {value2:.2f}, Battiti: {value3:.2f}, HRV:{rms:.2f}')
+                    last_values.append(f'Time:{value2:.2f}, GSR: {value3:.2f}, Battiti: {value1:.2f}, HRV:{rms:.2f}, HRV2:{rms2:.2f}')
                     window['-LAST_VALUES-'].update('  '.join(last_values[-1:]))
                     window['-TIMER-'].update(format_timer(time_as_int() - start_time))
 
