@@ -21,6 +21,8 @@ import matplotlib.ticker as ticker
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 import configparser
+from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_values
+from hrvanalysis import get_time_domain_features
 
 #funzione per salvare l'identificativo
 def save_identificativo(identificativo):
@@ -77,6 +79,8 @@ values2 = []
 values3 = []
 last_values = ['', '', '']  # lista vuota per contenere gli ultimi 3 valori
 timestamps = []
+interpolati = []
+battiti = []
 
 # Crea la lista delle porte seriali disponibili
 def get_available_ports():
@@ -89,29 +93,42 @@ baud_list = ['1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200'
 
 # Aggiungi il grafico al layout
 layout = [
-    [sg.Text('Seleziona la porta seriale:')],
-    [sg.Combo(get_available_ports(), size=(30, 1), key='-PORT-', enable_events=True)],
-    [sg.Text('Seleziona il baudrate:')],
-    [sg.Combo(baud_list, size=(30, 1), key='-BAUD-', default_value='9600')],
-    [sg.Button('Connetti', key='-CONNECT-'), sg.Button('Esci', key='-EXIT-')],
-    [sg.Column([
-        [sg.Text("Inserisci il tuo codice identificativo:"),sg.InputText(identificativo,key='-IDENTIFICATIVO-')],
-        [sg.Text("Seleziona un file audio:")],
-        [sg.Combo(audio_files, key="-FILE-")],
-        [sg.Text('Output seriale:')],
-        [sg.Multiline(size=(80, 10), key='-OUTPUT-')],
-        [sg.Button('Start', key='-START-'), sg.Button('Stop', key='-STOP-')]
-    ]), sg.Column([
-        [sg.Text('Ultimi tre valori:')],
-        [sg.Text('', size=(80, 1), key='-LAST_VALUES-')],
-        [sg.Text('Timer')],
-        [sg.Text('', size=(20, 1), key='-TIMER-')],
-        [sg.Canvas(key='canvas')]
-    ])]
+    [
+        sg.Column([
+            [sg.Text('Seleziona la porta seriale:')],
+            [sg.Combo(get_available_ports(), size=(30, 1), key='-PORT-', enable_events=True)],
+            [sg.Text('Seleziona il baudrate:')],
+            [sg.Combo(baud_list, size=(30, 1), key='-BAUD-', default_value='9600')],
+            [sg.Button('Connetti', key='-CONNECT-'), sg.Button('Esci', key='-EXIT-')]
+        ], vertical_alignment='top'),
+    
+    
+        sg.Column([
+            [sg.Text("Inserisci il tuo codice identificativo:"), sg.InputText(identificativo, key='-IDENTIFICATIVO-')],
+            [sg.Text("Seleziona un file audio:")],
+            [sg.Combo(audio_files, key="-FILE-")],
+            [sg.Text('Output seriale:')],
+            [sg.Multiline(size=(50, 10), key='-OUTPUT-')],
+            [sg.Button('Start', key='-START-'), sg.Button('Stop', key='-STOP-')],
+            [sg.Text('Ultimi tre valori:')],
+            [sg.Text('', size=(50, 3), key='-LAST_VALUES-')],
+            [sg.Text('Timer')],
+            [sg.Text('', size=(50, 1), key='-TIMER-')],
+        ], vertical_alignment='top'),
+        
+        sg.Column([
+            [sg.Canvas(key='canvas')]
+        ], vertical_alignment='top'),
+
+        sg.Column([
+            [sg.Canvas(key='canvas2')]
+        ], vertical_alignment='top')
+    ]
 ]
 
+
 # Crea la finestra dell'interfaccia grafica
-window = sg.Window('OPENBIOFEEDBACK', layout, finalize=True)
+window = sg.Window('OPENBIOFEEDBACK', layout, finalize=True,resizable=True)
 
 ser = None
 reading_serial = False
@@ -120,12 +137,13 @@ graph_running = False
 # Funzione per l'aggiornamento del grafico
 def update_graph():
     fig, ax = plt.subplots()
+    fig2, ax2 = plt.subplots()
     line, = ax.plot(timestamps, values3, color='blue', label = 'GSR')
-    ax2 = ax.twinx()
     line2, = ax2.plot(timestamps, values1, color='red', label = 'HR')
+    line2b, = ax2.plot(timestamps, battiti, color='black', label = 'TIME')
     line.set_label('GSR')
     line2.set_label('HR')
-    ax.legend(loc='upper left')
+    ax.legend(loc='upper right')
     ax2.legend(loc='upper right')
     #ax.legend()
     #ax2.legend()
@@ -142,9 +160,15 @@ def update_graph():
     canvas.draw()
     canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
 
+    canvas2 = FigureCanvasTkAgg(fig2, master=window['canvas2'].TKCanvas)
+    canvas2.draw()
+    canvas2.get_tk_widget().pack(side='top', fill='both', expand=True)
+
+
     while graph_running:
         line.set_data(timestamps, values3)
         line2.set_data(timestamps, values1)
+        line2b.set_data(timestamps, battiti)
         ax.relim()
         ax.autoscale_view()
         ax2.relim()
@@ -157,6 +181,7 @@ def update_graph():
 
         
         canvas.draw()
+        canvas2.draw()
         time.sleep(0.1)
 
 # Thread per l'aggiornamento del grafico
@@ -191,6 +216,7 @@ while True:
         if not ser:
             sg.popup('Connetti alla porta seriale prima di avviare la lettura.')
         else:
+            window["-STOP-"].update(disabled=False)
             reading_serial = True
             sg.popup('Lettura iniziata.')
             start_time = time_as_int()
@@ -219,10 +245,11 @@ while True:
         pygame.mixer.music.stop()
         is_playing = False
         window["-STOP-"].update(disabled=True)
-
+        #svuoto tutte le serie di dati acquisite
         values1.clear()
         values2.clear()
         values3.clear()
+        rr_intervals_without_outliers.clear()
         timestamps.clear()
 
         if reading_serial:
@@ -256,6 +283,43 @@ while True:
                     #elimino i picchi dall'HRV
                     indici_picchi, _ = find_peaks(values2)
                     valori_senza_picchi = np.delete(values2, indici_picchi)
+                    rr_intervals_without_outliers = remove_outliers(rr_intervals=values2,  
+                                                low_rri=300, high_rri=2000)
+                    interpolated_rr_intervals = interpolate_nan_values(rr_intervals=rr_intervals_without_outliers,
+                                                   interpolation_method="linear")
+                    # This remove ectopic beats from signal
+                    nn_intervals_list = remove_ectopic_beats(rr_intervals=interpolated_rr_intervals, method="malik")
+                    # This replace ectopic beats nan values with linear interpolation
+                    interpolated_nn_intervals = interpolate_nan_values(rr_intervals=nn_intervals_list)
+                    interpolati = interpolated_nn_intervals
+                    battiti = [60000 / x  for x in interpolati] #calcolo battiti ripuliti
+
+                    time_domain_features = get_time_domain_features(interpolated_nn_intervals)
+                    min_hr = time_domain_features['min_hr']
+                    max_hr = time_domain_features['max_hr']
+                    mean_hr = time_domain_features['mean_hr']
+                    mean_nni = time_domain_features['mean_nni']
+                    sd_nn = time_domain_features['sdnn']
+                    rmssd = time_domain_features['rmssd']
+
+                    #>>> time_domain_features
+                    #{'mean_nni': 718.248,
+                    #'sdnn': 43.113,
+                    #'sdsd': 19.519,
+                    #'nni_50': 24,
+                    #'pnni_50': 2.4,
+                    #'nni_20': 225,
+                    #'pnni_20': 22.5,
+                    #'rmssd': 19.519,
+                    #'median_nni': 722.5,
+                    #'range_nni': 249,
+                    #'cvsd': 0.0272,
+                    #'cvnni': 0.060,
+                    #'mean_hr': 83.847,
+                    #'max_hr': 101.694,
+                    #'min_hr': 71.513,
+                    #'std_hr': 5.196}
+
 
                     #calcolo lo scarto quadratico medio per HRV
                     sq_diff = np.square(values2 - np.mean(values2))
@@ -265,12 +329,14 @@ while True:
                     sq_diff2 = np.square(valori_senza_picchi - np.mean(valori_senza_picchi))
                     rms2 = np.sqrt(np.mean(sq_diff2))
 
+                    #calcolo lo scarto quadratico medio per HRV senza picchi con funzione importata
+                    
                     
                     # Aggiorna i tre ultimi valori letti
                     last_values.pop(0)
-                    last_values.append(f'Time:{value2:.2f}, GSR: {value3:.2f}, Battiti: {value1:.2f}, HRV:{rms:.2f}, HRV senza picchi:{rms2:.2f}')
+                    last_values.append(f'Time:{value2:.2f}, GSR: {value3:.2f}, Battiti: {value1:.2f},\n HRV:{rms:.2f}, HRV senza picchi:{rms2:.2f}, SDNN:{sd_nn:.2f},\n RMSSD:{rmssd:.2f}, minHR:{min_hr:.2f}, maxHR:{max_hr:.2f}')
 
-                    # Aggiorna l'interfaccia grafica con gli ultimi tre valori letti
+                    # Aggiorna l'interfaccia grafica con gli ultimi i valori letti e calcolati
                     window['-LAST_VALUES-'].update('\n'.join(last_values))
 
                     # Aggiorna l'interfaccia grafica con il timer
