@@ -1,7 +1,7 @@
 #Biofeedback mindfulness by Simone TRavaglini
 # Licence Apache 2.0
-#Da fare: si blocca generazione grafico dopo un po', farlo funzionare anche se non arriva valore HR (modifica sketch arduino), fare grafico HRV, calcolare HR medio di sessione,
-#rivedere calcolo HRV se metodo valido, nel grafico mostrare linee senza picchi, 
+#Da fare:  farlo funzionare anche se non arriva valore HR (modifica sketch arduino), 
+#PROBLEMI: quando riparte il grafico viene ricreato un nuovo grafico invece che aggiornato il precedente, rimettere creazione CSV
 #
 
 import csv
@@ -23,6 +23,8 @@ import matplotlib.pyplot as plt
 import configparser
 from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_values
 from hrvanalysis import get_time_domain_features
+
+
 
 #funzione per salvare l'identificativo
 def save_identificativo(identificativo):
@@ -91,7 +93,7 @@ def get_available_ports():
 # Crea la lista dei baudrate disponibili
 baud_list = ['1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200']
 
-# Aggiungi il grafico al layout
+# Definisci il layout
 layout = [
     [
         sg.Column([
@@ -130,65 +132,108 @@ layout = [
 # Crea la finestra dell'interfaccia grafica
 window = sg.Window('OPENBIOFEEDBACK', layout, finalize=True,resizable=True)
 
+#inizializza variabili a FALSE
 ser = None
 reading_serial = False
 graph_running = False
 
-# Funzione per l'aggiornamento del grafico
-def update_graph():
-    fig, ax = plt.subplots()
-    fig2, ax2 = plt.subplots()
-    line, = ax.plot(timestamps, values3, color='blue', label = 'GSR')
-    line2, = ax2.plot(timestamps, values1, color='red', label = 'HR')
-    line2b, = ax2.plot(timestamps, battiti, color='black', label = 'TIME')
-    line.set_label('GSR')
-    line2.set_label('HR')
-    ax.legend(loc='upper right')
-    ax2.legend(loc='upper right')
-    #ax.legend()
-    #ax2.legend()
 
+
+
+def create_graph():
+      
+        fig, ax = plt.subplots()
+        fig2, ax2 = plt.subplots()
+        line, = ax.plot(timestamps, values3, color='blue', label = 'GSR')
+        line2, = ax2.plot(timestamps, values1, color='red', label = 'HR')
+        line2b, = ax2.plot(timestamps, battiti, color='black', label = 'TIME')
+        line.set_label('GSR')
+        line2.set_label('HR')
+        ax.legend(loc='upper right')
+        ax2.legend(loc='upper right')
+        #ax.legend()
+        #ax2.legend()
+        
+        def format_xaxis(x, _):
+            return format_timer(int(x))
+
+        #formatto asse X hh:mm:ss
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_xaxis))
+        ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_xaxis))  
+
+        canvas = FigureCanvasTkAgg(fig, master=window['canvas'].TKCanvas)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+
+        canvas2 = FigureCanvasTkAgg(fig2, master=window['canvas2'].TKCanvas)
+        canvas2.draw()
+        canvas2.get_tk_widget().pack(side='top', fill='both', expand=True)
+       
     
-
-    def format_xaxis(x, _):
-        return format_timer(int(x))
-
-    #ax.xaxis.set_major_formatter(mdates.FuncFormatter(format_xaxis))
-    ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_xaxis))
-
-    canvas = FigureCanvasTkAgg(fig, master=window['canvas'].TKCanvas)
-    canvas.draw()
-    canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
-
-    canvas2 = FigureCanvasTkAgg(fig2, master=window['canvas2'].TKCanvas)
-    canvas2.draw()
-    canvas2.get_tk_widget().pack(side='top', fill='both', expand=True)
-
-
-    while graph_running:
-        line.set_data(timestamps, values3)
-        line2.set_data(timestamps, values1)
-        line2b.set_data(timestamps, battiti)
-        ax.relim()
-        ax.autoscale_view()
-        ax2.relim()
-        ax2.autoscale_view()
-
-        
-        # Imposta solo 5 valori come indicatori sull'asse X
-        max_ticks = 5  # Numero di indicatori desiderati sull'asse X
-        ax.xaxis.set_major_locator(plt.MaxNLocator(max_ticks))
-
-        
         canvas.draw()
         canvas2.draw()
+       
         time.sleep(0.1)
+#fine funzione aggiornamento grafico
 
-# Thread per l'aggiornamento del grafico
-graph_thread = threading.Thread(target=update_graph)
+
+
+
+# Funzione per l'aggiornamento del grafico
+def update_graph():
+          
+        fig, ax = plt.subplots()
+        fig2, ax2 = plt.subplots()
+        line, = ax.plot(timestamps, values3, color='blue', label = 'GSR')
+        line2, = ax2.plot(timestamps, values1, color='red', label = 'HR')
+        line2b, = ax2.plot(timestamps, battiti, color='black', label = 'TIME')
+        line.set_label('GSR')
+        line2.set_label('HR')
+        ax.legend(loc='upper right')
+        ax2.legend(loc='upper right')
+        #ax.legend()
+        #ax2.legend()
+        
+        def format_xaxis(x, _):
+            return format_timer(int(x))
+
+        #formatto asse X hh:mm:ss
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_xaxis))
+        ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_xaxis))  
+
+        canvas = FigureCanvasTkAgg(fig, master=window['canvas'].TKCanvas)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+
+        canvas2 = FigureCanvasTkAgg(fig2, master=window['canvas2'].TKCanvas)
+        canvas2.draw()
+        canvas2.get_tk_widget().pack(side='top', fill='both', expand=True)
+
+
+        while graph_running:
+            line.set_data(timestamps, values3)
+            line2.set_data(timestamps, values1)
+            line2b.set_data(timestamps, battiti)
+            ax.relim()
+            ax.autoscale_view()
+            ax2.relim()
+            ax2.autoscale_view()
+            
+            # Imposta solo 5 valori come indicatori sull'asse X
+            max_ticks = 5  # Numero di indicatori desiderati sull'asse X
+            ax.xaxis.set_major_locator(plt.MaxNLocator(max_ticks))
+            ax2.xaxis.set_major_locator(plt.MaxNLocator(max_ticks))
+        
+            canvas.draw()
+            canvas2.draw()
+            print("graph is running")
+            time.sleep(0.1)
+#fine funzione aggiornamento grafico
+
 
 # Loop principale dell'applicazione
 while True:
+   
     event, values = window.read()
     if event == '-EXIT-' or event == sg.WIN_CLOSED:
         break
@@ -201,15 +246,17 @@ while True:
                 ser.flushInput()
                 sg.popup(f"Connessione riuscita alla porta {values['-PORT-']} con baudrate {values['-BAUD-']}.")
                 window.Element('-CONNECT-').Update(disabled=True)
-                graph_running = True
-                graph_thread.start()
+                          
                 break
+            
             except Exception as e:
                 sg.popup(f"Errore di connessione alla porta seriale: {e}")
                 continue
 
 while True:
     event, values = window.read(timeout=100)
+    
+
     if event == '-EXIT-' or event == sg.WIN_CLOSED:
         break
     elif event == '-START-':
@@ -217,8 +264,20 @@ while True:
             sg.popup('Connetti alla porta seriale prima di avviare la lettura.')
         else:
             window["-STOP-"].update(disabled=False)
+            
             reading_serial = True
+            #fai partire i grafici
+                       
+            graph_running = True
+            graph_thread = threading.Thread(target=update_graph)
+            graph_thread.start()
+            #firstRun = False
+            
             sg.popup('Lettura iniziata.')
+            # Cancella tutti i valori precedenti accumulati nella coda seriale - NON FUNZIONA
+            ser.flush()
+            #ser.flushInput()
+            
             start_time = time_as_int()
             selected_file = values["-FILE-"]
             identificativo = values["-IDENTIFICATIVO-"]
@@ -241,16 +300,27 @@ while True:
                 else:
                     sg.popup('Nessun file audio selezionato.')
 
+    
+    
     elif event == '-STOP-':
         pygame.mixer.music.stop()
+        graph_running = False        
         is_playing = False
         window["-STOP-"].update(disabled=True)
+        
         #svuoto tutte le serie di dati acquisite
         values1.clear()
         values2.clear()
         values3.clear()
         rr_intervals_without_outliers.clear()
         timestamps.clear()
+        interpolati.clear()
+        battiti.clear()
+        
+        # Aggiorna l'interfaccia grafica con i valori resettati
+        window['-LAST_VALUES-'].update('')
+        window['-TIMER-'].update('')
+
 
         if reading_serial:
             reading_serial = False
@@ -341,17 +411,21 @@ while True:
 
                     # Aggiorna l'interfaccia grafica con il timer
                     window['-TIMER-'].update(timenow)
+
                     
+                    
+                   
+                                    
                 except ValueError:
                     continue
 
     except Exception as e:
         sg.popup(f"Errore di lettura seriale: {e}")
+           
         continue
 
 # Termina il thread del grafico e chiude la porta seriale
-graph_running = False
-graph_thread.join()
+graph_running = False#graph_thread.join()
 
 if ser:
     ser.close()
