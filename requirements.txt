@@ -1,0 +1,5 @@
+hrv-analysis
+PySimpleGUI
+pygame
+serial
+pyserial
