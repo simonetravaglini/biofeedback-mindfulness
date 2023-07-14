@@ -1,8 +1,11 @@
 
 #include <math.h> // Includi la libreria math per le funzioni matematiche standard
 #include"TFT_eSPI.h" //include TFT LCD library 
+#include <SPI.h>
+#include <Seeed_FS.h>
+#include "SD/Seeed_SD.h"
 
-
+File myFile;
 TFT_eSPI tft; //initialize TFT LCD 
 
 const int GSR = A0;
@@ -23,23 +26,39 @@ unsigned long gsrSeries[3600][2];
 unsigned long hrSeries[3600][3];
 double hrvRms;
 
-
-
+String sessionOwner;
+String sessionName;
 
 /*SETUP*/
 
 void setup() {
+  sessionOwner = generateRandomString(10);
+  sessionName = generateRandomString(10);
+
   pinMode(GSR, INPUT); // GSR
   Serial.begin(9600);
   tft.begin(); //start TFT LCD 
   tft.setRotation(3); //set screen rotation 
   tft.fillScreen(TFT_BLACK); //fill background 
-
   tft.setTextColor(TFT_WHITE); //set text color
-  tft.setTextSize(4); //set text size 
- 
+  tft.setTextSize(1); //set text size 
   
   attachInterrupt(digitalPinToInterrupt(2), interrupt, RISING);
+
+/*INIZIALIZZO SCHEDA SD*/
+  tft.drawString("INIZIALIZZO SCHEDA SD",5,2);
+  delay(1000);
+  if (!SD.begin(SDCARD_SS_PIN, SDCARD_SPI)) {
+    tft.drawString("INIZIALIZZAZIONE SCHEDA SD FALLITA",5,20);
+    while (1);
+  }
+  tft.drawString("INIZIALIZZAZIONE SCHEDA SD RIUSCITA",5,50);
+  delay(2000);
+  tft.fillScreen(TFT_BLACK); //fill background 
+  
+/*Fine inizializzazione*/
+tft.setTextSize(4);
+
 }
 
 
@@ -86,7 +105,26 @@ void gsr() {
   tft.drawNumber(heart_rate,100,50); //draw text string 
   tft.setCursor(100, 100);
   tft.print(hrvRms,2); //draw float
-  
+   /*scrivo i dati del GSR nel file CSV*/
+   myFile = SD.open("gsr.csv",FILE_APPEND);
+   if (myFile) {
+    
+    myFile.print(sessionName);
+    myFile.print(",");
+    myFile.print("Simone");
+    myFile.print(",");   
+    myFile.print("GSR");
+    myFile.print(",");
+    myFile.print(gsrIndex);
+    myFile.print(",");
+    myFile.println(conductance);
+    // close the file:
+    myFile.close();
+      
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+  } 
   }
 
 
@@ -130,6 +168,23 @@ float calculateRMS(float values[], int length) {
 }
 
 
+
+String generateRandomString(int lengthofstring) {
+  String characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  String randomString = "";
+
+  for (int i = 0; i < lengthofstring; i++) {
+    int randomIndex = random(characters.length());
+    char randomChar = characters[randomIndex];
+    randomString += randomChar;
+  }
+
+  return randomString;
+}
+
+String randomString = generateRandomString(10);
+
+
 /*funzione ricezione dati hrv quando c'è lettura*/ 
 void interrupt() {
   static unsigned long previousInterruptMillis = 0; /*Inizializzo la variabile (solo la prima volta, poi permanente in quanto static)*/
@@ -149,10 +204,30 @@ void interrupt() {
     hrSeries[hrIndex][2]=heart_rate; /*Inserisco la conduttanza*/
     hrvValues[hrIndex]=sub;
     /*CALCOLO dell'HRV come SCARTO QUADRATICO MEDIO (RMS)*/
-    hrvRms = calculateRMS(hrvValues, (hrIndex+1));
-        
-    
+    hrvRms = calculateRMS(hrvValues, (hrIndex+1));  
     hrIndex=hrIndex+1;
+
+       /*scrivo i dati del HR nel file CSV*/
+   myFile = SD.open("hr.csv",FILE_APPEND);
+   if (myFile) {
+    
+    myFile.print(sessionName);
+    myFile.print(",");
+    myFile.print("Simone");
+    myFile.print(",");   
+    myFile.print("HR");
+    myFile.print(",");
+    myFile.print(hrIndex);
+    myFile.print(",");
+    myFile.println(sub);
+    // close the file:
+    myFile.close();
+      
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+  }
+    
     send(); /*invio dati in seriale*/
   }
 }
