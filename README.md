@@ -1,3 +1,5 @@
+#ABANDONED PROJECT
+
 # biofeedback-mindfulness
 
 This script get from serial port 3 values separated from commas (time from last heart pulse, Galvanic skin response, heart rate ).
